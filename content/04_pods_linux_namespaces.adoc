@@ -4,7 +4,7 @@ Let's contrast what we've learned until now, creating two pods: *_BUDA_* and *_P
 
 ```bash
 $ cat << EOF |oc apply -f -
-include::kubernetes-manifests-example/example-pod-pv-pvc-share.yml[] 
+include::content/kubernetes-manifests-example/example-pod-pv-pvc-share.yml[] 
 EOF
 ```
 
@@ -12,14 +12,14 @@ EOF
 
 ```bash
 $ cat << EOF |oc apply -f -
-include::kubernetes-manifests-example/example-pod-buda.yml[] 
+include::content/kubernetes-manifests-example/example-pod-buda.yml[] 
 EOF
 ```
 
 3. Create the pod PEST
 ```bash
 $ cat << EOF |oc apply -f -
-include::kubernetes-manifests-example/example-pod-pest.yml[] 
+include::content/kubernetes-manifests-example/example-pod-pest.yml[] 
 EOF
 ```
 
