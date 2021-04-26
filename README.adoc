@@ -1,4 +1,25 @@
 = Containers From Scratch
+:toc: macro
+:sectanchors:
+:sectnumlevels: 2
+:sectnums: 
+:source-highlighter: pygments
+:imagesdir: ../images
+// Start: Enable admonition icons
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+ifndef::env-github[]
+:icons: font
+endif::[]
+// End: Enable admonition icons
+
+// Create the Table of contents here
+toc::[]
 
 I will try to explain through simple examples how *linux namespaces* technology is used to create that thing we call *containers*. But what a *container* is?, there are many info in blogs, articles over internet generally speaking about containers, according to that we can said that a *container* is isolated process running on a host. Container runtimes takes advantage over some pretty cool Linux kernel technologies that you might have overheard as namespaces, cgroups, chroots, etc. plus security layers like SELinux or Seccomp.
 
@@ -26,3 +47,57 @@ $ sudo dnf module install container-tools -y
 $ sudo dnf install -y jq tree
 $ pip3 install yq --user
 ```
+
+== Container File Systems (a.k.a rootfs)
+
+It could be said that _container images_ are a buch of _unchangeable_ static files compresses into a tarball. At the very end, in _Linux_ everithing is a file.
+
+TIP: There are many ways to build a _rootfs_ up as many tools to do it, i.e. https://buildroot.org/[buildroot].
+
+For the following examples we are going to download an already build rootfs for Alpine Linux. 
+
+```bash
+$ mkdir ~/rootfs ;cd ~/rootfs
+
+$ ALPINE_MINIROOT_FILENAME=$(curl -s https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml| yq -r '.[]| select(.file|test("alpine-minirootfs"))|.file')
+
+$ curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/$ALPINE_MINIROOT_FILENAME -o rootfs.tar.gz
+``` 
+
+We are going to create two temporary folders and then extract the rootfs.
+
+```bash
+$ mkdir /var/tmp/{buda,pest} 
+$ tar xfz rootfs.tar.gz -C /var/tmp/buda/
+$ tar xfz rootfs.tar.gz -C /var/tmp/pest/
+```
+
+If we take a look at the extracted files
+
+```bash
+ $ tree -L 1 /var/tmp/buda/
+```
+
+As you can see, the result looks like a Linux system. We have some well known directories in the Linux Filesystem Hierarchy Standard such as: __bin__, __tmp__, __dev__, __opt__, __etc__.
+
+```bash
+/var/tmp/buda/
+├── bin
+├── dev
+├── etc
+├── home
+├── lib
+├── media
+├── mnt
+├── opt
+├── proc
+├── root
+├── run
+├── sbin
+├── srv
+├── sys
+├── tmp
+├── usr
+└── var
+```
+== chroot 
