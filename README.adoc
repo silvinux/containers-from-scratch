@@ -1,1 +1,28 @@
-# containers-from-scratch
+= Containers From Scratch
+
+I will try to explain through simple examples how *linux namespaces* technology is used to create that thing we call *containers*. But what a *container* is?, there are many info in blogs, articles over internet generally speaking about containers, according to that we can said that a *container* is isolated process running on a host. Container runtimes takes advantage over some pretty cool Linux kernel technologies that you might have overheard as namespaces, cgroups, chroots, etc. plus security layers like SELinux or Seccomp.
+
+Container runtime have different approaches, in Docker tehy'll get their own namespace, meanwhile in CoreOS’ rkt, will be grouped and containers will share namespaces, each of which is called a pod.
+
+We will see how we can leverage these technologies on Linux in order to build and run our own containers, and then we will contrast it against kubernetes / openshift
+
+== Container Tools 
+
+To be able to get the job done, we will need access to machine with basics container tools, like the following:
+
+* Buildah builds
+* Podman runs
+* Skopeo transfers container images.
+* Container-selinux
+* Containernetworking-plugins
+* Fuse-overlayfs
+* slirp4netns
+
+
+I will be using a RHEL8/Fedora server. The tools I've mentioned before could be installed through package modules, which will make our life easier.  
+
+```bash
+$ sudo dnf module install container-tools -y
+$ sudo dnf install -y jq tree
+$ pip3 install yq --user
+```
