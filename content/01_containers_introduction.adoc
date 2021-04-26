@@ -1,0 +1,763 @@
+== Container File Systems (a.k.a rootfs)
+
+It could be said that _container images_ are a buch of _unchangeable_ static files compresses into a tarball. At the very end, in _Linux_ everithing is a file.
+
+TIP: There are many ways to build a _rootfs_ up as many tools to do it, i.e. https://buildroot.org/[buildroot].
+
+For the following examples we are going to download an already build rootfs for Alpine Linux. 
+
+```bash
+$ mkdir ~/rootfs ;cd ~/rootfs
+
+$ ALPINE_MINIROOT_FILENAME=$(curl -s https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml| yq -r '.[]| select(.file|test("alpine-minirootfs"))|.file')
+
+$ curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/$ALPINE_MINIROOT_FILENAME -o rootfs.tar.gz
+``` 
+
+We are going to create two temporary folders and then extract the rootfs.
+
+```bash
+$ mkdir /var/tmp/{buda,pest} 
+$ tar xfz rootfs.tar.gz -C /var/tmp/buda/
+$ tar xfz rootfs.tar.gz -C /var/tmp/pest/
+```
+
+If we take a look at the extracted files
+
+```bash
+ $ tree -L 1 /var/tmp/buda/
+```
+
+As you can see, the resulting directory looks like a Linux system. We have some well known directories in the Linux Filesystem Hierarchy Standard such as: __bin__, __tmp__, __dev__, __opt__, __etc__.
+
+```bash
+/var/tmp/buda/
+├── bin
+├── dev
+├── etc
+├── home
+├── lib
+├── media
+├── mnt
+├── opt
+├── proc
+├── root
+├── run
+├── sbin
+├── srv
+├── sys
+├── tmp
+├── usr
+└── var
+```
+== chroot 
+
+The first tool we are going to discover will be https://en.wikipedia.org/wiki/Chroot[chroot]. which basically, is an operation that will allows us to restrict a process’ view of the file system, changing the apparent root directory for the current running process and its children.
+
+Now we can use the Alpine Linux rootfs we've already downloaded and  restric the process to this rootfs, in other words will be chrooted it.
+
+* Create the chroot jail.
+
+```bash
+$ sudo chroot /var/tmp/buda /bin/sh
+```
+ 
+* Check the OS release 
+
+```bash
+$ cat /etc/os-release
+NAME="Alpine Linux"
+ID=alpine
+VERSION_ID=x.y.z
+PRETTY_NAME="Alpine Linux vx.y"
+HOME_URL="https://alpinelinux.org/"
+BUG_REPORT_URL="https://bugs.alpinelinux.org/"
+```
+
+* Install python and run a simple http server for example:
+
+```bash
+$ echo "nameserver 8.8.8.8" > /etc/resolv.conf
+$ apk add python3
+$ python3 -m http.server
+```
+
+NOTE: When we execute the Python interpreter we’re actually running it from /var/tmp/buda/usr/bin/python3, which is the rootfs of out chrooted env.
+
+* If you open a new terminal on your system (even if it’s outside of the chroot) you will be able to reach the http server we just created:
+
+```bash
+$ curl http://127.0.0.1:8000
+```
+
+== Namespaces
+
+Until now, we are able to work with a tarball, that acts as a complete different system from our host, but all we've done so far really isolated our processes from the host? 
+
+Let's have a look into it, to check if we are acting as a container.
+
+* In a shell in the host, outside the chroot run a ping command:
+
+```bash
+$ ping 127.0.0.1
+```
+
+* Mount the proc filesystem inside the chrooted shell
+
+```bash
+$ mount -t proc proc /proc
+```
+
+* Run a ps command inside the chroot and try to find the ping command:
+
+```bash
+$ ps -ef | grep "ping 127.0.0.1"
+```
+
+* We have visibility over the host system processes, that’s not great. On top of that, our chroot is running as root so we can even kill the process:
+
+```bash
+$ pkill -f "ping 127.0.0.1"
+```
+
+Now we can talk about namespaces.
+
+**Linux namespaces** are a feature of the Linux kernel that allow the isolated environment to have a different state than the host even though they are sharing a Kernel.
+
+The contents of the filesystem are typically provided by an image file and the environment exists as a chroot process in the filesystem.
+
+The network stack inside the container is constructed with the Linux network stack primitives to share a connection with the host without worrying about conflicting port numbers.
+
+.Kernel Namespaces
+image::../images/kernel_namespaces.png[Kernel Namespaces]
+
+In figure above, the sandboxed container environment can be seen as the blue box. The orange boxes are the Kernel Namespaces and they are as follows:
+
+.Kernel Namespaces
+[cols=3*,cols="1,2,5",options="header"]
+|===
+| Cgroup
+| Isolates
+| Summary
+
+|cgroups
+a|
+- Cgroup root directory
+|cgroups allow limits to be placed on a process and its children. Primarily, these are used for limiting CPU and RAM usage. 
+
+|IPC 
+a|
+- System V IPC
+- POSIX message queues
+|The Inter-Process Communication (IPC) Namespace limits the processes ability to share memory.
+
+|Network
+a|
+- Network devices
+- stacks
+- ports, etc.
+|The Network Namespace allows a new network stack to exist in the sandbox. This means our sandboxed environment can have its own network interfaces, routing tables, DNS lookup servers, IP addresses, subnets…​ you name it!.
+
+|Mount
+a|
+- Mount points
+|The Mount Namespace is the part of the Kernel that stores the mount table. When our sandboxed environment runs in a new Mount Namespace, it can mount filesystems not present on the host.
+
+|PID
+a|
+- Boot and monotonic clocks
+| The PID namespace allows a process and its children to run in a new process tree that maps back to the host process tree. The new PID namespace starts with PID 1 which will map to a much higher PID in the host’s native PID namespace.
+
+|User
+a|
+- User and group IDs
+| The User Namespaces allow our sandboxed environment to have its own set of user and group IDs that will map to very high, unique, user and group IDs back on the host system. They also allow the root user in the sandbox to be mapped to another user on the host.
+
+|UTS
+a|
+- Hostname and NIS domain name
+| The Unix Time Sharing (UTS) Namespace exists solely for storing the system’s hostname. 
+
+|===
+
+=== Creating namespaces with unshare
+
+Creating namespaces is just a single syscall (unshare). There is also a unshare command line tool that provides a nice wrapper around the syscall.
+
+We are going to use the unshare command line to create namespaces manually. Below example will create a PID namespace for the chrooted shell:
+
+    * Exit the chroot we have already running.
+
+    * Create the PID namespace and run the chrooted shell inside the namespace  
+
+```bash
+$ sudo unshare -p -f --mount-proc=/var/tmp/buda/proc chroot /var/tmp/buda/ /bin/sh
+```
+
+    * Now that we have created our new process namespace, we will see that our shell thinks its PID is 1:
+```bash
+$ ps -ef
+```
+NOTE: As you can see, we no longer see the host system processes
+
+```bash
+     PID   USER     TIME  COMMAND
+     1 root      0:00 /bin/sh
+     2 root      0:00 ps -ef
+```
+
+    * Since we didn’t create a namespace for the network we can still see the whole network stack from the host system:
+```bash
+ $ ip -o a
+```
+NOTE: Below output might vary on your system
+
+```bash
+# ip ad
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP qlen 1000
+    link/ether 52:54:00:97:cd:5b brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.50/24 brd 10.0.0.255 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5054:ff:fe97:cd5b/64 scope link 
+       valid_lft forever preferred_lft forever
+```
+
+=== Entering namespaces with nsenter
+
+One powerful thing about namespaces is that they’re pretty flexible, for example you can have processes with some separated namespaces and some shared namespaces. One example in the Kubernetes world will be containers running in pods: Containers will have different PID namespaces but they will share the Network namespace.
+
+There is a syscall (setns) that can be used to reassociate a thread with a namespace. The nsenter command line tool will help with that.
+
+We can check the namespaces for a given process by querying the `/proc` filesystem:
+
+NOTE: Below commands must be run from a shell outside the chroot:
+
+    * From a shell outside the chroot get the PID for the chrooted shell:
+
+```bash
+    $ UNSHARE_PPID=$(ps -ef | grep "sudo unshare" | grep chroot | awk '{print $2}')
+    $ UNSHARE_PID=$(ps -ef | grep ${UNSHARE_PPID} | grep chroot | grep -v sudo | awk '{print $2}')
+    $ SHELL_PID=$(ps -ef | grep ${UNSHARE_PID} | grep -v chroot |  grep /bin/sh | awk '{print $2}')
+    $ ps -ef | grep ${UNSHARE_PID} | grep -v chroot |  grep /bin/sh
+```
+
+```bash
+    root        4209    4208  0 17:08 pts/0    00:00:00 /bin/sh
+```    
+
+
+    * From a shell outside the chroot get the namespaces for the shell process:
+
+```bash
+$ sudo ls -l /proc/${SHELL_PID}/ns
+```
+```bash
+total 0
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 cgroup -> 'cgroup:[4026531835]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 ipc -> 'ipc:[4026531839]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 mnt -> 'mnt:[4026532293]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 net -> 'net:[4026531992]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 pid -> 'pid:[4026532294]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 pid_for_children -> 'pid:[4026532294]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 user -> 'user:[4026531837]'
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 uts -> 'uts:[4026531838]'
+```
+
+    * Earlier we saw how we were just setting a different PID namespace, let’s see the difference between the PID namespace configured for our chroot shell and for the regular shell:
+```bash
+$ sudo ls -l /proc/${SHELL_PID}/ns/pid
+lrwxrwxrwx. 1 root root 0 Apr 12 17:18 /proc/4209/ns/pid -> 'pid:[4026532294]'
+```
+
+    * Get PID namespace for the regular shell:
+```bash
+$ sudo ls -l /proc/$$/ns/pid
+lrwxrwxrwx. 1 ansible ansible 0 Apr 12 17:19 /proc/1255/ns/pid -> 'pid:[4026531836]'
+```
+
+    * As you can see, both processes are using a different PID namespace. We saw that network stack was still visible, let’s see if there is any difference in the Network namespace for both processes. Let’s start with the chrooted shell:
+
+```bash
+$ paste <(sudo ls -l /proc/${SHELL_PID}/ns/net| awk '{print $9,$NF}') <( sudo ls -l /proc/$$/ns/net| awk '{print $9,$NF}')
+
+/proc/4209/ns/net net:[4026531992]	/proc/1255/ns/net net:[4026531992]
+```
+
+    * As you can see from above outputs, both processes are using the same Network namespace.
+
+
+If we want to join a process to an existing namespace we can do that using nsenter, as we said before. Let’s do that.
+
+Open a new shell outside the chroot.
+
+We want run a new chrooted shell and join the already existing PID namespace we created earlier:
+
+```bash
+# Get the previous unshare PPID
+ $ UNSHARE_PPID=$(ps -ef | grep "sudo unshare" | grep chroot | awk '{print $2}')
+ # Get the previous unshare PID
+ $ UNSHARE_PID=$(ps -ef | grep ${UNSHARE_PPID} | grep chroot | grep -v sudo | awk '{print $2}')
+ # Get the previous chrooted shell PID
+ $ SHELL_PID=$(ps -ef | grep ${UNSHARE_PID} | grep -v chroot |  grep /bin/sh | awk '{print $2}')
+ # We will enter the previous PID namespace, remount the /proc filesystem and run a new chrooted shell
+ $ sudo nsenter --pid=/proc/${SHELL_PID}/ns/pid unshare -f chroot /var/tmp/pest/ /bin/sh
+
+```
+
+```bash
+$ mount -t proc proc /proc
+
+$ ps -ef
+PID   USER     TIME  COMMAND
+    1 root      0:00 /bin/sh
+   13 root      0:00 unshare -f chroot /var/tmp/pest/ /bin/sh
+   14 root      0:00 /bin/sh
+   15 root      0:00 ps -ef
+```
+
+    * We have entered the already existing PID namespace used by our previous chrooted shell and we can see that running a ps command from the new shell (PID 5) we can see the first shell (PID 1).
+
+=== Injecting files or directories into the chroot   
+
+Containers are usually inmutable, that means that we cannot create or edit directories or files into the chroot. Sometimes we will need to inject files or directories either for storage or configuration. We are going to show how we can create some files on the host system and expose them as read-only to the chrooted shell using mount.
+
+    * Create a folder in the host system to host some read-only config files:
+```bash
+$ sudo mkdir -p /var/tmp/shared-configs/
+$ echo "Test" | sudo tee -a /var/tmp/shared-configs/app-config
+$ echo "Test2" | sudo tee -a /var/tmp/shared-configs/srv-config
+```
+    * Create a folder in the rootfs directory to use it as mount point:
+```bash
+$ sudo mkdir -p /var/tmp/pest/etc/myconfigs
+```
+    * Run a bind mount:
+```bash
+ sudo mount --bind -o ro /var/tmp/shared-configs /var/tmp/pest/etc/myconfigs
+```
+
+
+NOTE: You can exit from the already existing chrooted shells before creating this one
+
+```bash
+$ sudo unshare -p -f --mount-proc=/var/tmp/pest/proc chroot /var/tmp/pest/ /bin/sh
+```
+
+
+If we try to edit the files from the chrooted shell, this is what happens:
+```bash
+$ ls -la /etc/myconfigs/
+total 12
+drwxr-xr-x    2 root     root            42 Apr 12 15:33 .
+drwxr-xr-x   16 1000     1000          4096 Apr 12 15:33 ..
+-rw-r--r--    1 root     root             5 Apr 12 15:33 app-config
+-rw-r--r--    1 root     root             6 Apr 12 15:33 srv-config
+ 
+ $ echo "test3" >> /etc/myconfigs/app-config
+
+ /bin/sh: cant create /etc/myconfigs/app-config: Read-only file system
+```
+
+
+If we want to unmount the files we can run the command below from the host system:
+```bash
+ sudo umount /var/tmp/pest/etc/myconfigs
+```
+
+=== Containers Networking
+
+Containers are based on Linux networking, and so insights learned in either can be applied to both.
+
+When you think of networking, you might think of applications communicating over HTTP, but actually a network refers more generally to a group of objects that communicate with each other by way of their unique addresses. The point is that networking refers to things communicating with things, and not necessarily an application or a container — it could be any device.
+ 
+One way to connect two containers is to create a virtual network. One way to do this is by creating two namespaces and two virtual ethernet cables. Each cable should be attached to a namespace on one side, and on the opposite end be united by a bridge, to complete the network.
+
+Now that we have defined containers as Linux namespaces, let’s see how the two namespaces that we previously created can be conected with their own network stack.
+
+.Containers Networking
+image::../images/containers_networking.png[Containers Networking]
+
+    * From the host we are going to run the following command:
+
+```bash
+$ sudo unshare -p -f --net --mount-proc=/var/tmp/buda/proc chroot /var/tmp/buda/ /bin/sh
+
+$ sudo unshare -p -f --net --mount-proc=/var/tmp/pest/proc chroot /var/tmp/pest/ /bin/sh
+```
+NOTE: Take into account that we added the flag --net, which will create the namespace with the network stack.
+
+    * Verify on both namespaces that the processes and network are isolated:
+
+```bash
+/ $ ps -ef
+PID   USER     TIME  COMMAND
+    1 root      0:00 /bin/sh
+    2 root      0:00 ps -ef
+/ $ ip ad
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+
+```
+
+    * From a shell outside the chroot get the PID for the chrooted shell BUDA and PEST:
+
+```bash
+$ BUDA_UNSHARE_PPID=$(ps -ef | grep "sudo unshare" |grep "buda"| grep chroot | awk '{print $2}')
+$ BUDA_UNSHARE_PID=$(ps -ef | grep ${BUDA_UNSHARE_PPID} | grep chroot | grep -v sudo | awk '{print $2}')
+$ BUDA_SHELL_PID=$(ps -ef | grep ${BUDA_UNSHARE_PID} | grep -v chroot |  grep /bin/sh | awk '{print $2}')
+$ ps -ef | grep ${BUDA_UNSHARE_PID} | grep -v chroot |  grep /bin/sh
+
+$ PEST_UNSHARE_PPID=$(ps -ef | grep "sudo unshare" |grep "pest"| grep chroot | awk '{print $2}')
+$ PEST_UNSHARE_PID=$(ps -ef | grep ${PEST_UNSHARE_PPID} | grep chroot | grep -v sudo | awk '{print $2}')
+$ PEST_SHELL_PID=$(ps -ef | grep ${PEST_UNSHARE_PID} | grep -v chroot |  grep /bin/sh | awk '{print $2}')
+$ ps -ef | grep ${PEST_UNSHARE_PID} | grep -v chroot |  grep /bin/sh
+
+```
+
+    * From a shell outside the chroot get the namespaces for the shell process:
+
+```bash
+$ paste <(sudo ls -l /proc/${BUDA_SHELL_PID}/ns/net| awk '{print $9,$NF}') <( sudo ls -l  /proc/${PEST_SHELL_PID}/ns/net| awk '{print $9,$NF}')
+
+/proc/4395/ns/net net:[4026532297]	/proc/4399/ns/net net:[4026532370]
+
+```    
+
+    * Create a Virtual Ethernet Cable for Each Namespace.
+
+A veth device is a virtual ethernet device that you can think of as a real ethernet cable connecting two other devices. Virtual ethernet devices act as tunnels between network namespaces. They create a bridge to a physical network device in another namespace. Virtual ethernets can also be used as standalone network devices as well.
+
+Veth devices are always created in interconnected pairs where packets transmitted on one device in the pair are immediately received on another device. When either device is down, the link state of the pair is down as well.
+
+In our example, we are creating two veth pairs. The BUDA namespace will connect to the veth-buda-ns end of the cable, and the other cable end should attach to a bridge that will create the network for our namespaces. We create the same cable and connect it to the bridge on the PEST side.
+
+
+    * Create the veth pair running the following:
+
+```bash
+$ sudo ip link add veth-buda-ns type veth peer name veth-buda-host
+
+$ sudo ip link add veth-pest-ns type veth peer name veth-pest-host
+
+ $ ip link list
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:97:cd:5b brd ff:ff:ff:ff:ff:ff
+3: veth-buda-host@veth-buda-ns: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 9e:ee:9e:32:e6:96 brd ff:ff:ff:ff:ff:ff
+4: veth-buda-ns@veth-buda-host: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether ee:29:49:f0:65:18 brd ff:ff:ff:ff:ff:ff
+5: veth-pest-host@veth-pest-ns: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 26:0b:e8:67:b5:2a brd ff:ff:ff:ff:ff:ff
+6: veth-pest-ns@veth-pest-host: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 82:50:23:07:9d:50 brd ff:ff:ff:ff:ff:ff
+
+
+```
+
+    * Attach the Veth Cables to Their Respective Namespaces
+    
+Now that we have a veth pair in the host namespace, let’s move the BUDA and PEST sides of the cables out into the BUDA and PEST namespaces.
+
+```bash
+$ sudo ip link set veth-buda-ns netns ${BUDA_SHELL_PID}
+
+$ sudo ip link set veth-pest-ns netns ${PEST_SHELL_PID}
+```
+
+    * If you check ip link list you will no longer find veth-buda-ns and veth-pest-ns since they aren’t in the host namespace.
+
+```bash
+    $ ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:97:cd:5b brd ff:ff:ff:ff:ff:ff
+3: veth-buda-host@if4: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 9e:ee:9e:32:e6:96 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+5: veth-pest-host@if6: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 26:0b:e8:67:b5:2a brd ff:ff:ff:ff:ff:ff link-netnsid 1
+```
+    * To see the ends of the cable you created, run the ip link command within the namespaces:
+
+```bash
+
+# BUDA
+$ ip ad
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+4: veth-buda-ns@if3: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether ee:29:49:f0:65:18 brd ff:ff:ff:ff:ff:f
+
+# PEST
+$ ip ad
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+4: veth-pest-ns@if3: <BROADCAST,MULTICAST,M-DOWN> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether ee:29:49:f0:65:18 brd ff:ff:ff:ff:ff:f
+```
+
+    * Assign IP Addresses to Each Namespace.
+
+Now we can use the IP command inside the namespaces to assing an address to each namespace as we do it in regular server.
+
+
+```bash
+# BUDA
+$ ip address add 192.168.0.55/24 dev veth-buda-ns
+$ ip link set lo up
+$ ip link set veth-buda-ns up
+$ ip ad
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+4: veth-buda-ns@if3: <NO-CARRIER,BROADCAST,MULTICAST,UP,M-DOWN> mtu 1500 qdisc noqueue state LOWERLAYERDOWN qlen 1000
+    link/ether ee:29:49:f0:65:18 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.55/24 scope global veth-buda-ns
+       valid_lft forever preferred_lft forever
+
+#PEST
+$ ip address add 192.168.0.56/24 dev veth-pest-ns
+$ ip link set lo up
+$ ip link set veth-pest-ns up
+$ ip ad
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+6: veth-pest-ns@if5: <NO-CARRIER,BROADCAST,MULTICAST,UP,M-DOWN> mtu 1500 qdisc noqueue state LOWERLAYERDOWN qlen 1000
+    link/ether 82:50:23:07:9d:50 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.56/24 scope global veth-pest-ns
+       valid_lft forever preferred_lft forever
+```
+
+    * Verify the configuration is ok pinging to its ip address.
+
+```bash
+# BUDA
+$ ping 192.168.0.55 -c4
+PING 192.168.0.55 (192.168.0.55): 56 data bytes
+64 bytes from 192.168.0.55: seq=0 ttl=64 time=0.041 ms
+64 bytes from 192.168.0.55: seq=1 ttl=64 time=0.072 ms
+64 bytes from 192.168.0.55: seq=2 ttl=64 time=0.083 ms
+64 bytes from 192.168.0.55: seq=3 ttl=64 time=0.077 ms
+
+# PEST
+$ ping 192.168.0.56 -c4
+PING 192.168.0.56 (192.168.0.56): 56 data bytes
+64 bytes from 192.168.0.56: seq=0 ttl=64 time=0.075 ms
+64 bytes from 192.168.0.56: seq=1 ttl=64 time=0.069 ms
+64 bytes from 192.168.0.56: seq=2 ttl=64 time=0.080 ms
+64 bytes from 192.168.0.56: seq=3 ttl=64 time=0.071 ms
+
+--- 192.168.0.56 ping statistics ---
+4 packets transmitted, 4 packets received, 0% packet loss
+round-trip min/avg/max = 0.069/0.073/0.080 ms
+```
+
+
+    * Bridge the Gap Between Namespaces
+
+You now have both the IPs and interfaces set, but you can’t establish communication with them. That’s because there’s no interface in the default namespace that can send the traffic to those namespaces, and we didn’t configure addresses to the other side of the veth pairs or configure a bridge device. But with the creation of the bridge device, we’ll be able to provide the necessary routing to properly form the network.
+
+
+```bash
+$ sudo ip link add name bridge-chain type bridge
+
+$ sudo ip link set bridge-chain  up
+
+$ ip ad show dev bridge-chain
+8: bridge-chain: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/ether ca:f6:80:e8:bb:70 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::c8f6:80ff:fee8:bb70/64 scope link 
+       valid_lft forever preferred_lft forever
+
+```
+
+    * As the bridge device is already set, it’s time to connect the bridge side of the veth cable to the bridge.
+
+```bash
+$ sudo ip link set veth-buda-host up
+
+$ sudo ip link set veth-pest-host up
+```
+
+    * You can add the veth interfaces to the bridge by setting the bridge device as their master.
+
+```bash
+$ sudo ip link set veth-buda-host master bridge-chain 
+
+$ sudo ip link set veth-pest-host master bridge-chain 
+```
+
+    * To verify the configuration we will check the bridge and ping namespaces between them:
+
+```bash
+# HOST
+$ bridge link show
+3: veth-buda-host@if4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master bridge-chain state forwarding priority 32 cost 2 
+5: veth-pest-host@if6: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master bridge-chain state forwarding priority 32 cost 2
+
+# BUDA
+$ ping 192.168.0.56 -c4
+PING 192.168.0.56 (192.168.0.56): 56 data bytes
+64 bytes from 192.168.0.56: seq=0 ttl=64 time=0.205 ms
+64 bytes from 192.168.0.56: seq=1 ttl=64 time=0.104 ms
+64 bytes from 192.168.0.56: seq=2 ttl=64 time=0.082 ms
+64 bytes from 192.168.0.56: seq=3 ttl=64 time=0.068 ms
+
+--- 192.168.0.56 ping statistics ---
+4 packets transmitted, 4 packets received, 0% packet loss
+round-trip min/avg/max = 0.068/0.114/0.205 ms
+/ # 
+
+# PEST
+$ ping 192.168.0.55 -c4
+PING 192.168.0.55 (192.168.0.55): 56 data bytes
+64 bytes from 192.168.0.55: seq=0 ttl=64 time=0.071 ms
+64 bytes from 192.168.0.55: seq=1 ttl=64 time=0.086 ms
+64 bytes from 192.168.0.55: seq=2 ttl=64 time=0.670 ms
+64 bytes from 192.168.0.55: seq=3 ttl=64 time=0.101 ms
+
+--- 192.168.0.55 ping statistics ---
+4 packets transmitted, 4 packets received, 0% packet loss
+round-trip min/avg/max = 0.071/0.232/0.670 ms
+```
+
+== cgroups
+
+Control groups allow the kernel to restrict resources like memory and CPU for specific processes. We are going to use cgroups V1, because is the version that uses kubernetes.
+
+In this case we are going to create a new CGroup for our chrooted shell so it cannot use more than 200MB of RAM.
+
+Kernel exposes cgroups at the `/sys/fs/cgroup` directory:
+
+```bash
+$ sudo ls /sys/fs/cgroup/
+blkio  cpu  cpuacct  cpu,cpuacct  cpuset  devices  freezer  hugetlb  memory  net_cls  net_cls,net_prio  net_prio  perf_event  pids  rdma  systemd
+
+```
+
+Let’s create a new cgroup, we just need to create a folder for that to happen:
+
+```bash
+ $ sudo mkdir /sys/fs/cgroup/memory/silvinux-workshop
+```
+
+
+NOTE: The kernel automatically populated the folder
+
+```bash
+$ sudo ls /sys/fs/cgroup/memory/silvinux-workshop -1
+cgroup.clone_children
+cgroup.event_control
+cgroup.procs
+memory.failcnt
+memory.force_empty
+memory.kmem.failcnt
+memory.kmem.limit_in_bytes
+memory.kmem.max_usage_in_bytes
+memory.kmem.slabinfo
+memory.kmem.tcp.failcnt
+memory.kmem.tcp.limit_in_bytes
+memory.kmem.tcp.max_usage_in_bytes
+memory.kmem.tcp.usage_in_bytes
+memory.kmem.usage_in_bytes
+memory.limit_in_bytes
+memory.max_usage_in_bytes
+memory.memsw.failcnt
+memory.memsw.limit_in_bytes
+memory.memsw.max_usage_in_bytes
+memory.memsw.usage_in_bytes
+memory.move_charge_at_immigrate
+memory.numa_stat
+memory.oom_control
+memory.pressure_level
+memory.soft_limit_in_bytes
+memory.stat
+memory.swappiness
+memory.usage_in_bytes
+memory.use_hierarchy
+notify_on_release
+tasks
+
+```
+
+Now, we just need to adjust the memory value by modifying the required files:
+
+```bash
+# Set a limit of 200MB of RAM
+$ echo "200000000" | sudo tee -a /sys/fs/cgroup/memory/silvinux-workshop/memory.limit_in_bytes
+# Disable swap
+$ echo "0" | sudo tee -a /sys/fs/cgroup/memory/silvinux-workshop/memory.swappiness
+```
+
+Finally, we need to assign this CGroup to our chrooted shell:
+```bash
+# Get the BUDA unshare PPID
+$ BUDA_UNSHARE_PPID=$(ps -ef | grep "sudo unshare" |grep "buda"| grep chroot | awk '{print $2}')
+# Get the BUDA unshare PPID
+$ BUDA_UNSHARE_PID=$(ps -ef | grep ${BUDA_UNSHARE_PPID} | grep chroot | grep -v sudo | awk '{print $2}')
+# Get the BUDA chrooted shell PID
+$ BUDA_SHELL_PID=$(ps -ef | grep ${BUDA_UNSHARE_PID} | grep -v chroot |  grep /bin/sh | awk '{print $2}')
+# Assign the shell process to the cgroup
+$ echo ${BUDA_SHELL_PID} | sudo tee -a /sys/fs/cgroup/memory/silvinux-workshop/cgroup.procs
+```
+
+In order to test the cgroup we will create a dumb python script in the chrooted shell:
+
+```bash
+# Mount the /dev fs since we need to read data from urandom
+$ mount -t devtmpfs dev /dev
+# Create the python script
+$ cat <<EOF > /opt/dumb.py
+f = open("/dev/urandom", "r", encoding = "ISO-8859-1")
+data = ""
+i=0
+while i < 20:
+   data += f.read(10000000) # 10mb
+   i += 1
+   print("Used %d MB" % (i * 10))
+EOF
+```
+
+Run the script:
+
+```bash
+$ / # python3 /opt/dumb.py
+Used 10 MB
+Used 20 MB
+Used 30 MB
+Used 40 MB
+Used 50 MB
+Used 60 MB
+Used 70 MB
+Used 80 MB
+Used 90 MB
+Used 100 MB
+Used 110 MB
+Used 120 MB
+Used 130 MB
+Used 140 MB
+Used 150 MB
+Used 160 MB
+Killed
+```
+
+Addionally, we can check the resource consumption (CPU, Memory, I/O) and number of tasks through the command "**systemd-cgtop**". To check Cgroup hierarchy of processes we can use the "**systemd-cgls**"
+
+```bash
+$ systemd-cgtop /silvinux-workshop
+```

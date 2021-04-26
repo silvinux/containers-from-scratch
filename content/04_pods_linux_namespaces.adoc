@@ -1,0 +1,217 @@
+Let's contrast what we've learned until now, creating two pods: *_BUDA_* and *_PEST_*. Each of them will be running a python http.server inside container exporting diferent port. 
+
+1. Create a shared storage to be used by the two pods.
+
+```bash
+$ cat << EOF |oc apply -f -
+include::kubernetes-manifests-example/example-pod-pv-pvc-share.yml[] 
+EOF
+```
+
+2. Create the pod BUDA
+
+```bash
+$ cat << EOF |oc apply -f -
+include::kubernetes-manifests-example/example-pod-buda.yml[] 
+EOF
+```
+
+3. Create the pod PEST
+```bash
+$ cat << EOF |oc apply -f -
+include::kubernetes-manifests-example/example-pod-pest.yml[] 
+EOF
+```
+
+4. Check events
+
+```bash
+...
+5m12s       Normal    Scheduled        pod/example-pod-buda   Successfully assigned workshop-user1/example-pod-buda to dworker00
+5m10s       Normal    AddedInterface   pod/example-pod-buda   Add eth0 [172.0.4.203/24]
+5m9s        Normal    Pulled           pod/example-pod-buda   Container image "quay.io/silvinux/alpine-net:latest" already present on machine
+5m9s        Normal    Created          pod/example-pod-buda   Created container container-buda
+5m9s        Normal    Started          pod/example-pod-buda   Started container container-buda
+2s          Normal    Scheduled        pod/example-pod-pest   Successfully assigned workshop-user1/example-pod-pest to dworker00
+0s          Normal    AddedInterface   pod/example-pod-pest   Add eth0 [172.0.4.204/24]
+0s          Normal    Pulled           pod/example-pod-pest   Container image "quay.io/silvinux/alpine-net:latest" already present on machine
+0s          Normal    Created          pod/example-pod-pest   Created container container-pest
+0s          Normal    Started          pod/example-pod-pest   Started container container-pest
+...
+```
+
+Let's try to run some commands inside the pods to check if we can communicate between them.
+
+Enter in *BUDA's* container and execute.
+
+```bash
+$ oc rsh example-pod-buda
+$ pwd
+$ uname -n 
+$ ps -ef
+$ echo $(uname -n) >> test-from-container.txt
+$ cat  test-from-container.txt
+$ ip ad
+$ ping -c4 $ip-pest
+
+```
+
+Enter in *PEST's* container and execute.
+
+```bash
+$ oc rsh example-pod-pest
+$ pwd
+$ ps -ef
+$ ls -la
+$ cat  test-from-container.txt
+$ echo $(uname -n) >> test-from-container.txt
+$ cat  test-from-container.txt
+$ ip ad
+$ ping -c4 $ip-buda
+```
+
+On both pods we can see the following:
+
+1. Processes and *_${PORT_CONTAINER}_* are different and isolated on both pods.
+2. They are using the *_shared storage_*.
+3. Processes are runnning with the *user _container_*, which was instructed by the Dockerfile when we created the image.
+4. Pods are able to communicate through their *_network stack_*.
+
+Let's try now to ckeck the limits, to see  it works, creating the dump eater memory python script and executing in both pods.
+
+From *BUDA* pod the script should be ended with an __Exit code 137__. This means that your process was killed by (signal 9) SIGKILLkilled, because we configure resources limits into the pod's manifest, allowing kubernetes to create a cgroup to handles this. 
+
+```yml
+...
+      resources:
+        limits:
+          cpu: "200m"
+          memory: 200Mi
+        requests:
+          cpu: "200m"
+          memory: 200Mi
+...          
+```
+
+```bash
+$ cat <<EOF > /app/shared/dumb.py
+f = open("/dev/urandom", "r", encoding = "ISO-8859-1")
+data = ""
+i=0
+while i < 20:
+   data += f.read(10000000) # 10mb
+   i += 1
+   print("Used %d MB" % (i * 10))
+EOF
+$ python3 /app/shared/dumb.py
+Used 10 MB
+Used 20 MB
+Used 30 MB
+Used 40 MB
+Used 50 MB
+Used 60 MB
+Used 70 MB
+Used 80 MB
+Used 90 MB
+Used 100 MB
+Used 110 MB
+Used 120 MB
+Used 130 MB
+Used 140 MB
+Used 150 MB
+Used 160 MB
+Used 170 MB
+command terminated with exit code 137
+```
+
+*PEST* pod limits's has been set to 300Mi. 
+
+```yml
+...   
+      resources:
+        limits:
+          cpu: "250m"
+          memory: 300Mi
+        requests:
+          cpu: "250m"
+          memory: 300Mi
+...   
+```
+
+Because of the former statement, the script will end OK in *PEST* pod because the script will be run until the memory consumption reach 200Mb
+
+```bash
+$ python3 /app/shared/dumb.py
+Used 10 MB
+Used 20 MB
+Used 30 MB
+Used 40 MB
+Used 50 MB
+Used 60 MB
+Used 70 MB
+Used 80 MB
+Used 90 MB
+Used 100 MB
+Used 110 MB
+Used 120 MB
+Used 130 MB
+Used 140 MB
+Used 150 MB
+Used 160 MB
+Used 170 MB
+Used 180 MB
+Used 190 MB
+Used 200 MB
+/app/shared $
+```
+
+Now we can check if kubernetes really creates a cgroups as we did in our previous examples. 
+
+Let's get the pod's containerIDs.
+
+```bash
+$ POD_BUDA_CONTAINERID=$(oc get pod example-pod-buda -ojson |jq -r '.status.containerStatuses[].containerID'|awk -F/ '{print $3}')
+
+$ POD_PEST_CONTAINERID=$(oc get pod example-pod-pest -ojson |jq -r '.status.containerStatuses[].containerID'|awk -F/ '{print $3}') 
+
+echo "cat /sys/fs/cgroup/memory/kubepods.slice/kubepods-pod*/crio-${POD_BUDA_CONTAINERID}.scope/memory.limit_in_bytes"
+
+echo "cat /sys/fs/cgroup/memory/kubepods.slice/kubepods-pod*/crio-${POD_PEST_CONTAINERID}.scope/memory.limit_in_bytes"
+```
+
+We need to know on which node is running our pods and check it inside that node. 
+
+IMPORTANT: You must admin to performe the following commands. We are going get into the node through the oc debug command, used to login into a node.   
+
+```bash
+$ oc get pods -owide
+NAME                      READY   STATUS    RESTARTS   AGE    IP            NODE        NOMINATED NODE   READINESS GATES
+example-pod-buda          1/1     Running   1          36m    172.0.4.203   dworker00   <none>           <none>
+example-pod-pest          1/1     Running   0          43m    172.0.4.204   dworker00   <none>           <none>
+
+$ oc debug node/dworker00
+Creating debug namespace/openshift-debug-node-4sh5t ...
+Starting pod/dworker00-debug ...
+To use host binaries, run `chroot /host`
+Pod IP: 10.0.113.101
+
+sh-4.4# chroot /host 
+
+```
+
+If we take a look under the __/sys/fs/cgroup/memory/__ directory is another directory named __kubepods.slice__, and in this case we will find our cgroups memory directories where all the parameter has been set. 
+
+```bash
+sh-4.4# ls /sys/fs/cgroup/memory/kubepods.slice/ -lsrt |tail -2
+0 drwxr-xr-x.  6 root root 0 Apr 26 10:25 kubepods-podcb552ef2_6a63_4d10_abc0_8ff6676cdca6.slice
+0 drwxr-xr-x.  6 root root 0 Apr 26 10:52 kubepods-podf52b3d85_d003_4d07_9b9e_fce586108e91.slice
+```
+
+Let's see where it leads.
+
+```bash
+sh-4.4# cat /sys/fs/cgroup/memory/kubepods.slice/kubepods-pod*/crio-${POD_BUDA_CONTAINERID}.scope/memory.limit_in_bytes"
+sh-4.4# cat /sys/fs/cgroup/memory/kubepods.slice/kubepods-pod*/crio-${POD_PEST_CONTAINERID}.scope/memory.limit_in_bytes"
+```
+
+As we can see, we were able to reproduce what we did from the start, but using kubernetes approach, it's pretty cool. isn't?.

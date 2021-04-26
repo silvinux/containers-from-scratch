@@ -1,0 +1,54 @@
+== Container Tools 
+
+To be able to get the job done, we will need access to machine with basics container tools, like the following:
+
+* Buildah builds
+* Podman runs
+* Skopeo transfers container images.
+* Container-selinux
+* Containernetworking-plugins
+* Fuse-overlayfs
+* slirp4netns
+
+
+I will be using a RHEL8/Fedora server. The tools I've mentioned before could be installed through package modules, which will make our life easier.  
+
+```bash
+$ sudo dnf module install container-tools -y
+$ sudo dnf install -y jq tree
+$ pip3 install yq --user
+```
+== cli tools 
+
+TIP: for Windows users can install https://git-scm.com/download/win[git bash], which emulates a bash environment on windows. It lets you use all git features in command line plus most of standard unix commands. It has a portable version, very useful in the following chapters due all examples are linux based.
+
+=== About the OpenShift CLI
+
+With the OpenShift command-line interface (CLI), the oc command, you can create applications and manage OpenShift Container Platform projects from a terminal. The OpenShift CLI is ideal in the following situations:
+
+* Working directly with project source code
+* Scripting OpenShift Container Platform operations
+* Managing projects while restricted by bandwidth resources and the web console is unavailable
+
+=== Installing the OpenShift CLI
+
+Check the documentation https://docs.openshift.com/container-platform/4.7/cli_reference/openshift_cli/getting-started-cli.html[getting started cli]
+
+=== Installing the OpenShift CLI on Linux
+
+You can install the OpenShift CLI (oc) either by downloading the binary or by using an RPM. we are going to download the binaries following the procedure: 
+
+```bash
+# Set variable openshift_cli to get lastest binary version 
+
+$ openshift_cli=$(curl -s https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/ | grep -E "openshift-client-linux-.*.tar.gz" | sed -r 's/.*href="([^"]+).*/\1/g')
+
+# Download the binary
+
+$ curl https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/$openshift_cli --output $openshift_cli
+
+# Uncompress the binary at the /usr/local/bin/ path 
+
+$ tar -xvzf $openshift_cli -C /usr/local/bin/
+$ oc completion bash >/etc/bash_completion.d/openshift
+```

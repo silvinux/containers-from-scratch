@@ -1,11 +1,12 @@
 = Containers From Scratch
 :toc: macro
-:sectanchors:
-:sectnumlevels: 2
-:sectnums: 
-:source-highlighter: pygments
-:imagesdir: ../images
-// Start: Enable admonition icons
+:toclevels: 4
+:doctype: book
+:listing-caption: Listing
+:sectnumlevels: 6
+:numbered:
+:chapter-label:
+:imagesdir: images/
 ifdef::env-github[]
 :tip-caption: :bulb:
 :note-caption: :information_source:
@@ -16,10 +17,16 @@ endif::[]
 ifndef::env-github[]
 :icons: font
 endif::[]
-// End: Enable admonition icons
+ifdef::backend-pdf[]
+:pygments-style: tango
+:source-highlighter: rouge
+:rouge-style: github
+:autofit-option:
+endif::[]
 
 // Create the Table of contents here
 toc::[]
+
 
 I will try to explain through simple examples how *linux namespaces* technology is used to create that thing we call *containers*. But what a *container* is?, there are many info in blogs, articles over internet generally speaking about containers, according to that we can said that a *container* is isolated process running on a host. Container runtimes takes advantage over some pretty cool Linux kernel technologies that you might have overheard as namespaces, cgroups, chroots, etc. plus security layers like SELinux or Seccomp.
 
@@ -27,77 +34,22 @@ Container runtime have different approaches, in Docker tehy'll get their own nam
 
 We will see how we can leverage these technologies on Linux in order to build and run our own containers, and then we will contrast it against kubernetes / openshift
 
-== Container Tools 
+== Tools
+include::content/00_tools.adoc[leveloffset=+3]
 
-To be able to get the job done, we will need access to machine with basics container tools, like the following:
+== Containers introduction
+include::content/01_containers_introduction.adoc[leveloffset=+3]
 
-* Buildah builds
-* Podman runs
-* Skopeo transfers container images.
-* Container-selinux
-* Containernetworking-plugins
-* Fuse-overlayfs
-* slirp4netns
+== Building Base Containers
+include::content/02_build_your_images.adoc[leveloffset=+3]
+
+== Podman in action
+include::content/03_podman_in_action.adoc[leveloffset=+3]
+
+== Pods vs Linux Namespaces
+include::content/04_pods_linux_namespaces.adoc[leveloffset=+3]
+
+== Sources
+include::content/99_sources.adoc[leveloffset=+3]
 
 
-I will be using a RHEL8/Fedora server. The tools I've mentioned before could be installed through package modules, which will make our life easier.  
-
-```bash
-$ sudo dnf module install container-tools -y
-$ sudo dnf install -y jq tree
-$ pip3 install yq --user
-```
-
-== Container File Systems (a.k.a rootfs)
-
-It could be said that _container images_ are a buch of _unchangeable_ static files compresses into a tarball. At the very end, in _Linux_ everithing is a file.
-
-TIP: There are many ways to build a _rootfs_ up as many tools to do it, i.e. https://buildroot.org/[buildroot].
-
-For the following examples we are going to download an already build rootfs for Alpine Linux. 
-
-```bash
-$ mkdir ~/rootfs ;cd ~/rootfs
-
-$ ALPINE_MINIROOT_FILENAME=$(curl -s https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml| yq -r '.[]| select(.file|test("alpine-minirootfs"))|.file')
-
-$ curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/$ALPINE_MINIROOT_FILENAME -o rootfs.tar.gz
-``` 
-
-We are going to create two temporary folders and then extract the rootfs.
-
-```bash
-$ mkdir /var/tmp/{buda,pest} 
-$ tar xfz rootfs.tar.gz -C /var/tmp/buda/
-$ tar xfz rootfs.tar.gz -C /var/tmp/pest/
-```
-
-If we take a look at the extracted files
-
-```bash
- $ tree -L 1 /var/tmp/buda/
-```
-
-As you can see, the result looks like a Linux system. We have some well known directories in the Linux Filesystem Hierarchy Standard such as: __bin__, __tmp__, __dev__, __opt__, __etc__.
-
-```bash
-/var/tmp/buda/
-├── bin
-├── dev
-├── etc
-├── home
-├── lib
-├── media
-├── mnt
-├── opt
-├── proc
-├── root
-├── run
-├── sbin
-├── srv
-├── sys
-├── tmp
-├── usr
-└── var
-```
-== chroot 

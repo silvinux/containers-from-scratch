@@ -1,0 +1,180 @@
+
+Podman is a daemonless, open source, Linux-native tool designed to develop, manage, and run Open Container Initiative (OCI) containers and pods. It has a similar directory structure to Buildah, Skopeo, and CRI-O. Podman doesn’t require an active container engine for its commands to work.
+
+The Podman approach is simply to directly interact with the image registry, with the container and image storage, and with the Linux kernel through the runC container runtime process (not a daemon).
+
+
+=== Registry in a container
+
+A container image registry is a service that stores container images, and is hosted either by a third-party or as a public/private registry such as Docker Hub, Quay, and so on.
+
+Our local containers configuration will be under the `/etc/containers/` directory. In this directory, we can find the registries configuration, which points by default to three differents registries:
+
+```bash
+$ egrep -v '#|^$' /etc/containers/registries.conf 
+[registries.search]
+registries = ['registry.access.redhat.com', 'registry.redhat.io', 'docker.io']
+[registries.insecure]
+registries = []
+[registries.block]
+registries = []
+unqualified-search-registries = ["registry.fedoraproject.org", "registry.access.redhat.com", "registry.centos.org", "docker.io"]
+```
+TIP: To test it, we will create a registry, running from a container. 
+
+* Download the registry image:
+
+```bash
+$ podman pull registry
+Completed short name "registry" with unqualified-search registries (origin: /etc/containers/registries.conf)
+Trying to pull registry.access.redhat.com/registry:latest...
+  name unknown: Repo not found
+Trying to pull registry.redhat.io/registry:latest...
+  unable to retrieve auth token: invalid username/password: unauthorized: Please login to the Red Hat Registry using your Customer Portal credentials. Further instructions can be found here: https://access.redhat.com/RegistryAuthentication
+Trying to pull docker.io/library/registry:latest...
+Getting image source signatures
+Copying blob 339e0c26c7cc skipped: already exists  
+Copying blob 6ba25693af03 skipped: already exists  
+Copying blob 9b794450f7b6 skipped: already exists  
+Copying blob 9eb68e7589ff [--------------------------------------] 0.0b / 0.0b
+Copying blob 6cf77150f665 [--------------------------------------] 0.0b / 0.0b
+Copying config ee34aa9d8a done  
+Writing manifest to image destination
+Storing signatures
+ee34aa9d8ab2cac40f256d19556838868d34bf80ad0857aa4a9501a4d1359ac6
+
+$ podman images
+REPOSITORY                                             TAG     IMAGE ID      CREATED        SIZE
+docker.io/library/registry                             latest  ee34aa9d8ab2  11 days ago    26.8 MB
+```
+* As you can see, the image has been downloaded from the first registry where it was found, __docker.io__
+
+* In order to configure the contenarized registry, I've setup a CNAME of the host, named "registry", and enabled the registry default's port. 
+
+```bash
+$ host registry
+registry.bcnconsulting.com is an alias for workshop.bcnconsulting.com.
+workshop.bcnconsulting.com has address 10.0.0.50
+
+$ sudo systemctl status firewalld # make sure firewalld is running
+$ sudo firewall-cmd --zone="$(sudo firewall-cmd --get-default-zone)" --add-port=5000/tcp --permanent
+$ sudo firewall-cmd --reload
+```
+
+* Now we can start the registry and check it.
+```bash
+$ podman run -dit -p 5000:5000 --name registry registry
+d50292fd273dfa633efee9067426aac66e48d4b81fa29d152ebeac46085d424c
+
+$ podman ps -a
+CONTAINER ID  IMAGE                              COMMAND               CREATED         STATUS             PORTS                   NAMES
+d50292fd273d  docker.io/library/registry:latest  /etc/docker/regis...  21 seconds ago  Up 20 seconds ago  0.0.0.0:5000->5000/tcp  registry
+
+```
+=== How would you copy images from registry A to registry B
+
+What we've seen so far to copy images is pretty symply, and it’s what most people would do:
+
+1. Pull the image from internal.registry/myimage:latest 
+2. Tag the image with production.registry/myimage:v1.0 
+3. Push to production.registry/myimage:v1.0
+
+This works reasonably well and many people are already used to doing it with the podman/docker command:
+
+```bash
+$ podman pull internal.registry/myimage:latest
+$ podman tag internal.registry/myimage:latest production.registry/myimage:v1.0
+$ podman push production.registry/myimage:v1.0
+```
+
+I'd like to introduce you to *Skopeo*, which is a command line tool for working with remote image registries. *Skopeo* doesn’t require a daemon to be running while performing its operations. 
+
+You can inspect images by running: 
+
+```bash
+$ skopeo inspect docker://registry.bcnconsulting.com:5000/silvinux/alpine-net --tls-verify=false
+{
+    "Name": "registry.bcnconsulting.com:5000/silvinux/alpine-net",
+    "Digest": "sha256:cca78abbcf1ebf03d422270c1323029781191090165854d5be3555004d9adc1c",
+    "RepoTags": [
+        "latest"
+    ],
+    "Created": "2021-04-26T07:55:04.912921275Z",
+    "DockerVersion": "",
+    "Labels": {
+        "io.buildah.version": "1.16.7"
+    },
+    "Architecture": "amd64",
+    "Os": "linux",
+    "Layers": [
+        "sha256:74782b667c7d97370a22aec902de10a0acbf19e545f0a770e1b7e37ab2b84774",
+        "sha256:12bebf8f15887a61e3039b5444d44b0fab08562b57b2fc57207c673fd172067f"
+    ],
+    "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ]
+}
+```
+
+In particular, the handy skopeo command called copy will ease the whole image copy operation. Without further ado, you can copy an image from a registry to another simply by running:
+
+```bash
+$  skopeo copy  docker://registry-source/image:tag docker://registry-destination/image:tag
+```
+
+Let's try it, just copying the image we created to a public registry, in this case to my public quay.io account.
+
+TIP: It should be noted that it must be logged into the registry we will copy the image, before attempt to copy it. You can do it running the following command:
+
+```bash
+$ skopeo login quay.io
+Username: silvinux
+Password: 
+Login Succeeded!
+```
+
+```bash
+$ skopeo copy --src-tls-verify=false docker://registry.bcnconsulting.com:5000/silvinux/alpine-net:latest docker://quay.io/silvinux/alpine-net:latest 
+Getting image source signatures
+Copying blob 74782b667c7d done  
+Copying blob 7daef80e8289 done  
+Copying blob c8fe4359fca3 done  
+Copying config bcde6e76a3 done  
+Writing manifest to image destination
+Copying config bcde6e76a3 [--------------------------------------] 0.0b / 2.0KiB
+Writing manifest to image destination
+Storing signatures
+```
+
+```bash
+$ skopeo inspect docker://quay.io/silvinux/alpine-net:latest 
+{
+    "Name": "quay.io/silvinux/alpine-net",
+    "Tag": "latest",
+    "Digest": "sha256:450aefc24aaa77410854a406eb903963bf59f77ef14366c82a4cd4b9409ffd39",
+    "RepoTags": [
+        "latest"
+    ],
+    "Created": "2021-04-23T16:32:59.058654816Z",
+    "DockerVersion": "",
+    "Labels": {
+        "io.buildah.version": "1.18.0"
+    },
+    "Architecture": "amd64",
+    "Os": "linux",
+    "Layers": [
+        "sha256:74782b667c7d97370a22aec902de10a0acbf19e545f0a770e1b7e37ab2b84774",
+        "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4",
+        "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4",
+        "sha256:5f84874a4e0d2776d3516fa03b2141d1ac20a7c950930ab6041f136003e0bf0e",
+        "sha256:3fd96518a28765662bd1acf56b90cb2307d1558d4db7f0d8dcf9b9bcdabe8cf8",
+        "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4",
+        "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4",
+        "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4"
+    ],
+    "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ]
+}
+```
+

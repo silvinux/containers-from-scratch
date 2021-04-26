@@ -1,0 +1,163 @@
+Create a directory to create our new fresh image.
+
+```bash
+$ mkdir -p ~/custom-apline-net/src;cd ~/custom-apline-net
+```
+
+This simple example starts creating a directory with one file: *Dockerfile*, which holds the instructions for building the container image: 
+
+```bash
+$ cat << EOF  > Dockerfile
+# Alpine-net
+# Alpine image with network tools
+FROM alpine:latest
+MAINTAINER silvinux <silvinux7@gmail.com>
+
+# non-root tools
+RUN apk --update add bash conntrack-tools coreutils curl drill \
+iperf3 iproute2 iptables iputils ip6tables keepalived net-tools \
+nftables socat ethtool mtr tcpdump busybox-extras && rm -rf /var/cache/apk/*
+
+RUN adduser -D -u 1000 container
+
+USER container
+
+WORKDIR /home/container
+EOF
+```
+
+Let's use *buildah* to build our new image.
+
+```bash
+$ buildah bud -t alpine-net .
+STEP 1: FROM alpine:latest
+STEP 2: MAINTAINER silvinux <silvinux7@gmail.com>
+STEP 3: RUN apk --update add bash python3 conntrack-tools coreutils curl drill iperf3 iproute2 iptables iputils ip6tables keepalived net-tools nftables socat ethtool mtr tcpdump busybox-extras && rm -rf /var/cache/apk/*
+fetch https://dl-cdn.alpinelinux.org/alpine/v3.13/main/x86_64/APKINDEX.tar.gz
+fetch https://dl-cdn.alpinelinux.org/alpine/v3.13/community/x86_64/APKINDEX.tar.gz
+(1/57) Installing ncurses-terminfo-base (6.2_p20210109-r0)
+(2/57) Installing bash (5.1.0-r0)
+...
+(56/57) Installing python3 (3.8.8-r0)
+(57/57) Installing tcpdump (4.99.0-r0)
+Executing busybox-1.32.1-r6.trigger
+Executing ca-certificates-20191127-r5.trigger
+OK: 72 MiB in 71 packages
+STEP 4: RUN adduser -D -u 1000 container
+STEP 5: USER container
+STEP 6: WORKDIR /home/container
+STEP 7: CMD ["/bin/sh"]
+STEP 8: COMMIT alpine-net
+Getting image source signatures
+Copying blob b2d5eeeaba3a skipped: already exists  
+Copying blob 200e3c5139a6 done  
+Copying config 0a8e9bd5f9 done  
+Writing manifest to image destination
+Storing signatures
+--> 0a8e9bd5f9c
+0a8e9bd5f9c7f9aa577d09a2220c7996946f02a5411737eaf819582d9ddab85f
+```
+
+Shown below, when you build the container from the above Dockerfile, each step corresponds to a command run in the Dockerfile. And each layer is made up of the file generated from running that command. Along with each step, the layer created is listed represented by its random generated ID. 
+
+The *buildah* __bud__ command creates a new image named alpine-net. To see that new image, type: 
+
+```bash
+$ buildah images
+REPOSITORY                                           TAG      IMAGE ID       CREATED         SIZE
+localhost/alpine-net                                 latest   0a8e9bd5f9c7   2 minutes ago   70.2 MB
+```
+
+Once the image is built, you can view all the layers that make up the image. With buildah inspect, you can show information about a container or image. 
+
+For example, to inspect the alpine-net image and get some of the parameter we instructed into the Dockerfile just type: 
+
+```bash
+$ buildah inspect localhost/alpine-net |jq '.OCIv1|{author,config,rootfs}'
+{
+  "author": "silvinux <silvinux7@gmail.com>",
+  "config": {
+    "User": "container",
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "Cmd": [
+      "/bin/sh"
+    ],
+    "WorkingDir": "/home/container",
+    "Labels": {
+      "io.buildah.version": "1.16.7"
+    }
+  },
+  "rootfs": {
+    "type": "layers",
+    "diff_ids": [
+      "sha256:b2d5eeeaba3a22b9b8aa97261957974a6bd65274ebd43e1d81d0a7b8b752b116",
+      "sha256:200e3c5139a6138f1ea1e1ead0a2c5533b0e850bdcfc29542f233da78d583694"
+    ]
+  }
+}
+```
+Or we can get the history into the image specs:
+
+```bash
+$ buildah inspect localhost/alpine-net |jq '.OCIv1|{history}'
+{
+  "history": [
+    {
+      "created": "2021-04-14T19:19:39.267885491Z",
+      "created_by": "/bin/sh -c #(nop) ADD file:8ec69d882e7f29f0652d537557160e638168550f738d0d49f90a7ef96bf31787 in / "
+    },
+    {
+      "created": "2021-04-14T19:19:39.643236135Z",
+      "created_by": "/bin/sh -c #(nop)  CMD [\"/bin/sh\"]",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T09:54:58.71236958+02:00",
+      "created_by": "/bin/sh -c #(nop) MAINTAINER silvinux <silvinux7@gmail.com>",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T09:55:04.099253709+02:00",
+      "created_by": "/bin/sh -c apk --update add bash python3 conntrack-tools coreutils curl drill iperf3 iproute2 iptables iputils ip6tables keepalived net-tools nftables socat ethtool mtr tcpdump busybox-extras && rm -rf /var/cache/apk/*",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T09:55:04.836110836+02:00",
+      "created_by": "/bin/sh -c adduser -D -u 1000 container",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T09:55:04.836200647+02:00",
+      "created_by": "/bin/sh -c #(nop) USER container",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T09:55:04.875270012+02:00",
+      "created_by": "/bin/sh -c #(nop) WORKDIR /home/container",
+      "empty_layer": true
+    },
+    {
+      "created": "2021-04-26T07:55:06.551500255Z",
+      "created_by": "/bin/sh -c #(nop) CMD [\"/bin/sh\"]",
+      "author": "silvinux <silvinux7@gmail.com>"
+    }
+  ]
+}
+```
+
+TIP:  The image layer can be viewed with the podman history command. The “Image” column (i.e intermediate image or layer) shows the randomly generated UUID that correlates to that layer.  
+
+```bash
+$ podman history --no-trunc  localhost/alpine-net
+ID                                                                CREATED         CREATED BY                                     SIZE     COMMENT
+0a8e9bd5f9c7f9aa577d09a2220c7996946f02a5411737eaf819582d9ddab85f  46 minutes ago  /bin/sh -c #(nop) CMD ["/bin/sh"]              64.4 MB  
+6dbb9cc54074106d46d4ccb330f2a40a682d49dda5f4844962b7dce9fe44aaec  46 minutes ago  /bin/sh -c #(nop) WORKDIR /home/container      0 B      
+<missing>                                                         46 minutes ago  /bin/sh -c #(nop) USER container               0 B      
+<missing>                                                         46 minutes ago  /bin/sh -c adduser -D -u 1000 container        0 B      
+<missing>                                                         46 minutes ago  /bin/sh -c apk --update add bash python3 c...  0 B      
+<missing>                                                         46 minutes ago  /bin/sh -c #(nop) MAINTAINER silvinux <sil...  0 B      
+<missing>                                                         11 days ago     /bin/sh -c #(nop)  CMD ["/bin/sh"]             0 B      
+<missing>                                                         11 days ago     /bin/sh -c #(nop) ADD file:8ec69d882e7f29f...  5.88 MB
+```
