@@ -1,4 +1,4 @@
-== Container Tools 
+=== Container Tools 
 
 To be able to get the job done, we will need access to machine with basics container tools, like the following:
 
@@ -18,11 +18,11 @@ $ sudo dnf module install container-tools -y
 $ sudo dnf install -y jq tree
 $ pip3 install yq --user
 ```
-== cli tools 
+=== cli tools 
 
 TIP: for Windows users can install https://git-scm.com/download/win[git bash], which emulates a bash environment on windows. It lets you use all git features in command line plus most of standard unix commands. It has a portable version, very useful in the following chapters due all examples are linux based.
 
-=== About the OpenShift CLI
+==== About the OpenShift CLI
 
 With the OpenShift command-line interface (CLI), the oc command, you can create applications and manage OpenShift Container Platform projects from a terminal. The OpenShift CLI is ideal in the following situations:
 
@@ -30,11 +30,11 @@ With the OpenShift command-line interface (CLI), the oc command, you can create 
 * Scripting OpenShift Container Platform operations
 * Managing projects while restricted by bandwidth resources and the web console is unavailable
 
-=== Installing the OpenShift CLI
+==== Installing the OpenShift CLI
 
 Check the documentation https://docs.openshift.com/container-platform/4.7/cli_reference/openshift_cli/getting-started-cli.html[getting started cli]
 
-=== Installing the OpenShift CLI on Linux
+==== Installing the OpenShift CLI on Linux
 
 You can install the OpenShift CLI (oc) either by downloading the binary or by using an RPM. we are going to download the binaries following the procedure: 
 
