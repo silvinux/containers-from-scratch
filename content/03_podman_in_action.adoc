@@ -49,13 +49,9 @@ docker.io/library/registry                             latest  ee34aa9d8ab2  11 
 ```
 * As you can see, the image has been downloaded from the first registry where it was found, __docker.io__
 
-* In order to configure the contenarized registry, I've setup a CNAME of the host, named "registry", and enabled the registry default's port. 
+* If you have firewalld configured, you must open the ports, In order to be able to reach the contenarized registry.  Following commands should enable the registry default port.
 
 ```bash
-$ host registry
-registry.bcnconsulting.com is an alias for workshop.bcnconsulting.com.
-workshop.bcnconsulting.com has address 10.0.0.50
-
 $ sudo systemctl status firewalld # make sure firewalld is running
 $ sudo firewall-cmd --zone="$(sudo firewall-cmd --get-default-zone)" --add-port=5000/tcp --permanent
 $ sudo firewall-cmd --reload
@@ -89,10 +85,12 @@ $ podman push production.registry/myimage:v1.0
 
 I'd like to introduce you to *Skopeo*, which is a command line tool for working with remote image registries. *Skopeo* doesn’t require a daemon to be running while performing its operations. 
 
-You can inspect images by running: 
+You can inspect images, as local as remote, by running:
 
 ```bash
-$ skopeo inspect docker://registry.bcnconsulting.com:5000/silvinux/alpine-net --tls-verify=false
+$ skopeo inspect docker://$REGISTRY_WHERE_THE_IMAGE_IS/$IMAGE_NAME
+
+$ skopeo inspect docker://$(uname -n):5000/silvinux/alpine-net --tls-verify=false
 {
     "Name": "registry.bcnconsulting.com:5000/silvinux/alpine-net",
     "Digest": "sha256:cca78abbcf1ebf03d422270c1323029781191090165854d5be3555004d9adc1c",
@@ -127,14 +125,14 @@ Let's try it, just copying the image we created to a public registry, in this ca
 TIP: It should be noted that it must be logged into the registry we will copy the image, before attempt to copy it. You can do it running the following command:
 
 ```bash
-$ skopeo login quay.io
-Username: silvinux
-Password: 
+$ QUAY_USERNAME=silvinux
+$ skopeo login quay.io --username $QUAY_USERNAME
+Password:
 Login Succeeded!
 ```
 
 ```bash
-$ skopeo copy --src-tls-verify=false docker://registry.bcnconsulting.com:5000/silvinux/alpine-net:latest docker://quay.io/silvinux/alpine-net:latest 
+$  skopeo copy --src-tls-verify=false docker://$(uname -n):5000/silvinux/alpine-net:latest docker://quay.io/$QUAY_USERNAME/alpine-net:latest
 Getting image source signatures
 Copying blob 74782b667c7d done  
 Copying blob 7daef80e8289 done  
@@ -145,6 +143,8 @@ Copying config bcde6e76a3 [--------------------------------------] 0.0b / 2.0KiB
 Writing manifest to image destination
 Storing signatures
 ```
+
+Now we can inspect our image in the external registry, the one we've sent to quay.io, running the following.
 
 ```bash
 $ skopeo inspect docker://quay.io/silvinux/alpine-net:latest 

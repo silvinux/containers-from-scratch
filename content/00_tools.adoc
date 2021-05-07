@@ -49,6 +49,6 @@ $ curl https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/$openshi
 
 # Uncompress the binary at the /usr/local/bin/ path 
 
-$ tar -xvzf $openshift_cli -C /usr/local/bin/
-$ oc completion bash >/etc/bash_completion.d/openshift
+$ sudo tar -xvzf $openshift_cli -C /usr/local/bin/
+$ oc completion bash | sudo tee -a /etc/bash_completion.d/openshift
 ```

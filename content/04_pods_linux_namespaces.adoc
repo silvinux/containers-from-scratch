@@ -1,3 +1,39 @@
+
+IMPORTANT: To be able to run the following exercises you must have deployed an openshift cluster. As this guide pretend to be used as a learning resource, the following exercises will be provisioned with persistent storage using NFS. The NFS shares will be provided by a RHEL 8 server.
+
+===== NFS config
+====== Install Packages needed
+```bash
+$ yum install firewalld nfs-utils -y
+```
+
+====== Active services.
+```bash
+$ systemctl enable --now nfs-server rpcbind firewalld;systemctl start firewalld nfs-server rpcbind
+```
+
+====== Add firewall rules.
+```bash
+$ firewall-cmd --add-service={nfs,nfs3,mountd,rpc-bind} --permanent;firewall-cmd --reload
+```
+
+====== Create the directories and apply the corresponding permissions.
+Take into account that nobody user replaces nfsnobody on RHEL8
+
+```bash
+$ sudo mkdir /var/nfsshare/wksp-pod-shared
+$ sudo chmod 777 /var/nfsshare/wksp-pod-shared
+$ sudo chown nobody:nobody /var/nfsshare/wksp-pod-shared
+```
+
+====== Create the shares configuration and export the shares.
+```bash
+$ cat << EOF > /etc/exports.d/cidc.exports
+"/var/nfsshare/wksp-pod-shared" *(rw,no_root_squash)
+EOF
+$ sudo exportfs -rva
+```
+
 Let's contrast what we've learned until now, creating two pods: *_BUDA_* and *_PEST_*. Each of them will be running a python http.server inside container exporting diferent port. 
 
 1. Create a shared storage to be used by the two pods.
