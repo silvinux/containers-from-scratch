@@ -67,6 +67,49 @@ CONTAINER ID  IMAGE                              COMMAND               CREATED  
 d50292fd273d  docker.io/library/registry:latest  /etc/docker/regis...  21 seconds ago  Up 20 seconds ago  0.0.0.0:5000->5000/tcp  registry
 
 ```
+
+* To test our configuration we will download an image from another registry. In this case, I will download an image from RedHat registry, so we need to login first.
+
+```bash
+$ podman login registry.redhat.io
+Username: rhn-support-user
+Password:
+Login Succeeded!
+
+$ podman pull registry.access.redhat.com/rhscl/php-70-rhel7
+Trying to pull registry.access.redhat.com/rhscl/php-70-rhel7:latest...
+Getting image source signatures
+Copying blob ad46648f2433 done
+Copying blob 9c9d2ac50b32 done
+Copying blob 48ed3bfd8226 done
+Copying blob 4540ba787420 done
+Copying blob d327c1598329 done
+Copying config 2d5706ee46 done
+Writing manifest to image destination
+Storing signatures
+2d5706ee46457c98ea6540693b54180e80c967bc565ecb32b97b4ff0ddf96e0f
+```
+* Now we can tag and push it to the new containerized registry we’ve just setup. Take into account that the hostname will be used, that way you'll be reaching the registry service in the host.
+
+```bash
+$ podman tag registry.access.redhat.com/rhscl/php-70-rhel7 $(uname -n):5000/rhscl/php-70-rhel7
+```
+
+NOTE: I wil be using the flag --tls-verify=false which will allow us to connect with the registry we've setup in a container.
+
+```bash
+$ podman push $(uname -n):5000/rhscl/php-70-rhel7 --tls-verify=false
+Getting image source signatures
+Copying blob 08c4aa164cba done
+Copying blob 7c6c57a17fb3 done
+Copying blob f1d4519df3fc done
+Copying blob a551fb857b61 done
+Copying blob c3b514cae9b1 done
+Copying config 2d5706ee46 done
+Writing manifest to image destination
+Storing signatures
+```
+
 === How would you copy images from registry A to registry B
 
 What we've seen so far to copy images is pretty symply, and it’s what most people would do:
