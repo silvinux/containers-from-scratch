@@ -17,9 +17,9 @@ $ curl https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/$ALPI
 We are going to create two temporary folders and then extract the rootfs.
 
 ```bash
-$ mkdir /var/tmp/{buda,pest} 
-$ tar xfz rootfs.tar.gz -C /var/tmp/buda/
-$ tar xfz rootfs.tar.gz -C /var/tmp/pest/
+$ sudo mkdir /var/tmp/{buda,pest} 
+$ sudo tar xfz rootfs.tar.gz -C /var/tmp/buda/
+$ sudo tar xfz rootfs.tar.gz -C /var/tmp/pest/
 ```
 
 If we take a look at the extracted files

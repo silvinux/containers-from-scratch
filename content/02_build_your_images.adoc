@@ -14,7 +14,7 @@ FROM alpine:latest
 MAINTAINER silvinux <silvinux7@gmail.com>
 
 # non-root tools
-RUN apk --update add bash conntrack-tools coreutils curl drill \
+RUN apk --update add bash python3 conntrack-tools coreutils curl drill \
 iperf3 iproute2 iptables iputils ip6tables keepalived net-tools \
 nftables socat ethtool mtr tcpdump busybox-extras && rm -rf /var/cache/apk/*
 

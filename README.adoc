@@ -30,7 +30,7 @@ toc::[]
 
 I will try to explain through simple examples how *linux namespaces* technology is used to create that thing we call *containers*. I'd also like to mention that most of the content has been taken from many blogs I've read and adapted it. You can check all links at the end of the document in the <<Sources>> section. (special thanks to them for such a wonderful articles).
 
- But what a *container* is?, there are many info in blogs, articles over internet generally speaking about containers, according to that we can said that a *container* is isolated process running on a host. Container runtimes takes advantage over some pretty cool Linux kernel technologies that you might have overheard as namespaces, cgroups, chroots, etc. plus security layers like SELinux or Seccomp.
+But what a *container* is?. There are many info in blogs, articles over internet generally speaking about containers, according to that we can said that a *container* is isolated process running on a host. Container runtimes takes advantage over some pretty cool Linux kernel technologies that you might have overheard as namespaces, cgroups, chroots, etc. plus security layers like SELinux or Seccomp.
 
 Container runtime have different approaches, in Docker they'll get their own namespace, meanwhile in CoreOS’ rkt, will be grouped and containers will share namespaces, each of which is called a pod.
 
