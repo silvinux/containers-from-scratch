@@ -26,10 +26,10 @@ WORKDIR /home/container
 EOF
 ```
 
-Let's use *buildah* to build our new image.
+Let's build our new image.
 
 ```bash
-$ buildah bud -t alpine-net .
+$ podman build -t alpine-net .
 STEP 1: FROM alpine:latest
 STEP 2: MAINTAINER silvinux <silvinux7@gmail.com>
 STEP 3: RUN apk --update add bash python3 conntrack-tools coreutils curl drill iperf3 iproute2 iptables iputils ip6tables keepalived net-tools nftables socat ethtool mtr tcpdump busybox-extras && rm -rf /var/cache/apk/*
